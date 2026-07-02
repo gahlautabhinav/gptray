@@ -1,10 +1,13 @@
 use tauri::{
+    image::Image,
     menu::{CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     window::Color,
     AppHandle, Manager, PhysicalPosition, Runtime, Url, WebviewUrl, WebviewWindow,
     WebviewWindowBuilder, WindowEvent,
 };
+
+const TRAY_ICON_BYTES: &[u8] = include_bytes!("../icons/tray.png");
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
@@ -103,7 +106,7 @@ pub fn run() {
 
             let autostart_item_for_menu = autostart_item.clone();
             TrayIconBuilder::new()
-                .icon(app.default_window_icon().unwrap().clone())
+                .icon(Image::from_bytes(TRAY_ICON_BYTES).expect("valid tray icon"))
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(move |app, event| match event.id().as_ref() {
