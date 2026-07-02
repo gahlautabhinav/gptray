@@ -10,6 +10,45 @@ It is a direct port of the idea behind [ik190/macos-chatgpt-overlay-bar](https:/
 
 **Primary design constraint: minimize idle RAM.** Every architectural decision in this codebase — the choice of Tauri over Electron, and especially the lazy webview-creation strategy in Section 2 — exists in service of that one constraint. Measured idle RAM before first use is **~12-27MB** (Task Manager / `Get-Process`).
 
+### 1.1 Component diagram
+
+```mermaid
+flowchart TB
+    subgraph Input["Entry points"]
+        HK["Global hotkey\nCtrl+Shift+Space"]
+        TC["Tray left-click"]
+        TM["Tray menu -> Toggle"]
+    end
+
+    subgraph Host["gptray.exe -- Rust host (Tauri v2)"]
+        GS["tauri-plugin-global-shortcut"]
+        TI["TrayIconBuilder + Menu\n(Toggle / Launch at Login / Quit)"]
+        GOC["get_or_create_panel()"]
+        TP["toggle_panel()"]
+        AS["tauri-plugin-autostart"]
+    end
+
+    subgraph Panel["Panel window (built lazily)"]
+        WV["WebView2 (Edge/Chromium)"]
+        CGPT["chatgpt.com\n(external navigation, not an iframe)"]
+        WV --> CGPT
+    end
+
+    HK --> GS --> GOC
+    TC --> TI --> GOC
+    TM --> TI
+    GOC -- "first call: build" --> WV
+    GOC --> TP
+    TP -- "show / hide / reposition" --> Panel
+
+    AS -. "Windows Registry Run key" .-> OS["Windows startup"]
+
+    Session[("%LOCALAPPDATA%\\com.globalvox.chatgpt-overlay-bar\\EBWebView\npersistent cookies / session")]
+    WV --- Session
+```
+
+Everything inside `Host` is the ~12-27MB idle process. Nothing in `Panel` exists until `get_or_create_panel()` builds it on first use (Section 2).
+
 ## 2. The Core Design Decision: Lazy Webview Creation
 
 This is the single most important architectural choice in the codebase.
@@ -115,6 +154,41 @@ The trade-off (Section 8) is that once the panel opens, WebView2's Chromium proc
 ## 5. Control Flow
 
 Both entry points converge on the same two-function sequence: `get_or_create_panel(app)` then `toggle_panel(&window)`.
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant OS as Windows OS
+    participant Shortcut as global-shortcut plugin
+    participant Tray as Tray icon
+    participant Host as lib.rs (Rust)
+    participant Panel as WebView2 panel
+
+    alt Hotkey press
+        User->>OS: Ctrl+Shift+Space
+        OS->>Shortcut: global hotkey event (any focus)
+        Shortcut->>Host: handler fires (state == Pressed)
+    else Tray left-click
+        User->>Tray: left-click icon
+        Tray->>Host: on_tray_icon_event
+    end
+
+    Host->>Host: get_or_create_panel(app)
+    alt panel not yet built
+        Host->>Panel: WebviewWindowBuilder -> navigate chatgpt.com
+    else already exists
+        Host->>Panel: reuse existing window
+    end
+
+    Host->>Host: toggle_panel(&window)
+    alt currently visible
+        Host->>Panel: hide()
+    else currently hidden
+        Host->>Panel: position_bottom_right() -> show() -> set_focus()
+    end
+
+    Note over Panel: loses focus later -> Focused(false) -> hide()<br/>(click-away dismiss, Section 5.3)
+```
 
 ### 5.1 Hotkey press (`Ctrl+Shift+Space`)
 
